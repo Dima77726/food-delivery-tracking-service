@@ -1,0 +1,88 @@
+spring:
+  application:
+    name: tracking-service
+
+  lifecycle:
+    # Согласовано с stop_grace_period в docker-compose.yml.
+    timeout-per-shutdown-phase: 20s
+
+  grpc:
+    client:
+      channels:
+        # Сервис заказов: чей заказ, чья доставка и в каком она статусе.
+        orders:
+          address: ${ORDER_GRPC_ADDRESS:static://localhost:7086}
+          negotiation-type: plaintext
+
+app:
+  grpc:
+    orders:
+      deadline: ${ORDER_GRPC_DEADLINE:PT2S}
+
+  stores:
+    # Трек курьера. Настройки соединения свои, а не spring.cassandra.*: стартер Spring Boot
+    # здесь не используется, см. CassandraConfig.
+    cassandra:
+      contact-points: ${CASSANDRA_CONTACT_POINTS:localhost:9042}
+      local-datacenter: ${CASSANDRA_DATACENTER:datacenter1}
+      keyspace: ${CASSANDRA_KEYSPACE:food_delivery}
+      # Неделя истории трека. Строки исчезают сами, DELETE в Cassandra оставлял бы надгробия.
+      track-ttl: ${CASSANDRA_TRACK_TTL:P7D}
+      request-timeout: ${CASSANDRA_REQUEST_TIMEOUT:PT5S}
+
+  tracking:
+    live:
+      # Откуда браузеру разрешено открыть WebSocket. Через шлюз Origin — адрес фронтенда.
+      allowed-origins: ${TRACKING_ALLOWED_ORIGINS:http://localhost:*}
+      relay:
+        # Ретранслятор в STOMP-плагин RabbitMQ. По умолчанию выключен: из IDE сервис
+        # поднимается и без брокера, со встроенным брокером в памяти. В compose — включён.
+        enabled: ${TRACKING_RELAY_ENABLED:false}
+        host: ${RABBITMQ_HOST:localhost}
+        port: ${RABBITMQ_STOMP_PORT:61613}
+        virtual-host: ${RABBITMQ_VHOST:/}
+        login: ${RABBITMQ_USER:guest}
+        passcode: ${RABBITMQ_PASSWORD:guest}
+
+  security:
+    jwt:
+      issuer: ${JWT_ISSUER:food-delivery-platform}
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
+
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9088}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+server:
+  port: ${SERVER_PORT:8088}
+  shutdown: graceful
+
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{correlationId:-},%X{userId:-}] "
+  level:
+    root: INFO
+    com.dima.fooddelivery: DEBUG
+    # Драйвер Cassandra очень разговорчив на уровне INFO.
+    com.datastax.oss.driver: WARN

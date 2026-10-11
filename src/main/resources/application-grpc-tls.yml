@@ -1,0 +1,19 @@
+# Профиль grpc-tls: сервис трека ходит к сервису заказов по взаимному TLS, предъявляя свой
+# сертификат (CN=tracking-service). Включается в docker-compose.
+spring:
+  ssl:
+    bundle:
+      pem:
+        grpc:
+          keystore:
+            certificate: ${GRPC_TLS_CERTIFICATE}
+            private-key: ${GRPC_TLS_PRIVATE_KEY}
+          truststore:
+            certificate: ${GRPC_TLS_CA}
+  grpc:
+    client:
+      channels:
+        orders:
+          negotiation-type: tls
+          ssl:
+            bundle: grpc
