@@ -50,6 +50,30 @@ app:
       jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
 
 management:
+  # Трассировка. Спаны собирает Micrometer Tracing поверх OpenTelemetry и отправляет по OTLP
+  # в Tempo. Сквозной идентификатор trace живёт рядом с X-Correlation-Id, а не вместо него:
+  # метка запроса — наша, она едет и через то, что трассировка не покрывает (outbox, очереди).
+  tracing:
+    sampling:
+      # В локальном стеке — все запросы. В боевом этого слишком много: 0.1 и ниже.
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+  otlp:
+    tracing:
+      export:
+        # Выключено по умолчанию: запуск из IDE и тесты не должны сыпать в лог ошибками
+        # о недоступном Tempo. Docker Compose включает через TRACING_EXPORT_ENABLED=true.
+        enabled: ${TRACING_EXPORT_ENABLED:false}
+    metrics:
+      export:
+        # Метрики по-прежнему снимает Prometheus; стартер тянет OTLP-реестр метрик,
+        # и без этой строки он слал бы то же самое второй раз.
+        enabled: false
   server:
     port: ${MANAGEMENT_PORT:9088}
   endpoints:
@@ -80,7 +104,7 @@ server:
 
 logging:
   pattern:
-    correlation: "[${spring.application.name:},%X{correlationId:-},%X{userId:-}] "
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{correlationId:-},%X{userId:-}] "
   level:
     root: INFO
     com.dima.fooddelivery: DEBUG
