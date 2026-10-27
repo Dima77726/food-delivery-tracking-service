@@ -94,6 +94,9 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
+                        // HTTP-бэкенд аутентификации RabbitMQ для MQTT: его зовёт брокер, у которого нет токена.
+                        // Шлюз /internal/** не ведёт, порт сервиса наружу не опубликован — см. RabbitHttpAuthController.
+                        .requestMatchers(HttpMethod.POST, "/internal/rabbitmq/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole(ADMIN_ROLE)
                         .anyRequest().authenticated()
                 )

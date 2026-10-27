@@ -59,6 +59,13 @@ public class TestcontainersConfiguration {
             registry.add("app.tracking.live.relay.port", () -> rabbit.getMappedPort(STOMP_PORT));
             registry.add("app.tracking.live.relay.login", rabbit::getAdminUsername);
             registry.add("app.tracking.live.relay.passcode", rabbit::getAdminPassword);
+
+            // Приём точек по MQTT: AMQP-соединение к тому же брокеру. Сам флаг app.tracking.mqtt.enabled —
+            // в свойствах AbstractIntegrationTest: условия бинов вычисляются раньше этих свойств.
+            registry.add("spring.rabbitmq.host", rabbit::getHost);
+            registry.add("spring.rabbitmq.port", rabbit::getAmqpPort);
+            registry.add("spring.rabbitmq.username", rabbit::getAdminUsername);
+            registry.add("spring.rabbitmq.password", rabbit::getAdminPassword);
         };
     }
 

@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Import;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
+                "app.tracking.mqtt.enabled=true",
                 "logging.level.org.testcontainers=WARN",
                 "logging.level.com.datastax.oss.driver=WARN"
         }
