@@ -116,6 +116,12 @@
             <artifactId>reactor-netty-core</artifactId>
         </dependency>
 
+        <!-- Точки курьеров, пришедшие по MQTT: плагин RabbitMQ кладёт их в amq.topic, отсюда их читает AMQP. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>

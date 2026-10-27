@@ -1,4 +1,16 @@
 spring:
+  rabbitmq:
+    # AMQP — только для точек, пришедших по MQTT (app.tracking.mqtt). Соединение ленивое: выключенный
+    # приём к брокеру не подключается вовсе.
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        # Битая точка не повторяется по кругу: повтор не починит JSON и не сделает чужую доставку своей.
+        default-requeue-rejected: false
+
   application:
     name: tracking-service
 
@@ -43,6 +55,10 @@ app:
         virtual-host: ${RABBITMQ_VHOST:/}
         login: ${RABBITMQ_USER:guest}
         passcode: ${RABBITMQ_PASSWORD:guest}
+    mqtt:
+      # Приём точек курьеров по MQTT (плагин rabbitmq_mqtt → amq.topic → очередь tracking.courier-positions)
+      # и ручки HTTP-аутентификации брокера /internal/rabbitmq/*. Выключено по умолчанию: из IDE брокера нет.
+      enabled: ${TRACKING_MQTT_ENABLED:false}
 
   security:
     jwt:
@@ -50,6 +66,11 @@ app:
       jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8085/.well-known/jwks.json}
 
 management:
+  health:
+    rabbit:
+      # Индикатор брокера — только когда приём по MQTT включён; иначе недоступный из IDE RabbitMQ
+      # уводил бы готовность сервиса в DOWN.
+      enabled: ${TRACKING_MQTT_ENABLED:false}
   # Трассировка. Спаны собирает Micrometer Tracing поверх OpenTelemetry и отправляет по OTLP
   # в Tempo. Сквозной идентификатор trace живёт рядом с X-Correlation-Id, а не вместо него:
   # метка запроса — наша, она едет и через то, что трассировка не покрывает (outbox, очереди).
