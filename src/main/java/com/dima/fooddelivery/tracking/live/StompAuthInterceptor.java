@@ -1,5 +1,7 @@
 package com.dima.fooddelivery.tracking.live;
 
+import com.dima.fooddelivery.chat.service.ChatParticipants;
+import com.dima.fooddelivery.common.exception.ResourceNotFoundException;
 import com.dima.fooddelivery.common.security.SecurityConfig;
 import com.dima.fooddelivery.order.Order;
 import com.dima.fooddelivery.order.OrderClient;
@@ -36,24 +38,33 @@ import java.util.regex.Pattern;
  * любой, кто умеет считать, поэтому каждая подписка проверяется вопросом к сервису заказов:
  * чей заказ 42. Администратору можно всё. Чужой заказ — ERROR, соединение закрывается.
  *
- * <p><b>Писать клиенту некуда.</b> Точки отправляет курьер по REST, где проверяются его права
- * на доставку. Кадр SEND от клиента отклоняется — иначе любой подписчик мог бы рисовать
- * курьера где захочет.
+ * <p><b>Чат заказа.</b> На {@code /topic/order.42.chat} подписываются участники чата — клиент,
+ * курьер этой доставки и поддержка (см. {@code ChatParticipants}).
+ *
+ * <p><b>Писать можно только служебные кадры чата.</b> Точки отправляет курьер по REST, где
+ * проверяются его права на доставку, сообщения чата — тоже REST. Кадром SEND клиент шлёт лишь
+ * «печатаю» и «прочитал» на {@code /app/order.42.chat.typing|read} — в обработчик, а не в брокер.
+ * SEND прямо в {@code /topic/...} отклоняется: иначе любой подписчик мог бы рисовать курьера
+ * где захочет или писать в чат от чужого имени.
  */
 @Slf4j
 @Component
 public class StompAuthInterceptor implements ChannelInterceptor {
 
-    private static final Pattern ORDER_TOPIC = Pattern.compile("^/topic/order\\.(\\d+)\\.track$");
+    private static final Pattern TRACK_TOPIC = Pattern.compile("^/topic/order\\.(\\d+)\\.track$");
+    private static final Pattern CHAT_TOPIC = Pattern.compile("^/topic/order\\.(\\d+)\\.chat$");
+    private static final Pattern CHAT_SEND = Pattern.compile("^/app/order\\.(\\d+)\\.chat\\.(typing|read)$");
     private static final String BEARER = "Bearer ";
     private static final String ADMIN_AUTHORITY = "ROLE_ADMIN";
 
     private final JwtDecoder jwtDecoder;
     private final OrderClient orderClient;
+    private final ChatParticipants chatParticipants;
 
-    public StompAuthInterceptor(JwtDecoder jwtDecoder, OrderClient orderClient) {
+    public StompAuthInterceptor(JwtDecoder jwtDecoder, OrderClient orderClient, ChatParticipants chatParticipants) {
         this.jwtDecoder = jwtDecoder;
         this.orderClient = orderClient;
+        this.chatParticipants = chatParticipants;
     }
 
     @Override
@@ -67,7 +78,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
         switch (accessor.getCommand()) {
             case CONNECT -> accessor.setUser(authenticate(accessor));
             case SUBSCRIBE -> authorizeSubscription(accessor);
-            case SEND -> throw new MessageDeliveryException("Отправлять в живой трек может только сервис");
+            case SEND -> authorizeSend(accessor);
             default -> {
                 // DISCONNECT, UNSUBSCRIBE, ACK — без проверок.
             }
@@ -95,24 +106,30 @@ public class StompAuthInterceptor implements ChannelInterceptor {
     }
 
     private void authorizeSubscription(StompHeaderAccessor accessor) {
-        Principal principal = accessor.getUser();
+        AbstractAuthenticationToken authentication = requireUser(accessor);
+        String destination = accessor.getDestination() == null ? "" : accessor.getDestination();
 
-        if (!(principal instanceof AbstractAuthenticationToken authentication)) {
-            throw new MessageDeliveryException("Сначала CONNECT с токеном");
+        Matcher track = TRACK_TOPIC.matcher(destination);
+        if (track.matches()) {
+            authorizeTrack(authentication, Long.valueOf(track.group(1)));
+            return;
         }
 
-        String destination = accessor.getDestination();
-        Matcher matcher = destination == null ? null : ORDER_TOPIC.matcher(destination);
-
-        if (matcher == null || !matcher.matches()) {
-            throw new MessageDeliveryException("Подписаться можно только на /topic/order.{orderId}.track");
+        Matcher chat = CHAT_TOPIC.matcher(destination);
+        if (chat.matches()) {
+            requireChatParticipant(authentication, Long.valueOf(chat.group(1)));
+            return;
         }
 
+        throw new MessageDeliveryException(
+                "Подписаться можно только на /topic/order.{orderId}.track и /topic/order.{orderId}.chat");
+    }
+
+    private void authorizeTrack(AbstractAuthenticationToken authentication, Long orderId) {
         if (isAdmin(authentication)) {
             return;
         }
 
-        Long orderId = Long.valueOf(matcher.group(1));
         Order order = orderClient.requireOrder(orderId);
 
         if (!order.belongsToCustomer(Long.valueOf(authentication.getName()))) {
@@ -120,6 +137,39 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 
             throw new MessageDeliveryException("Заказ с id=" + orderId + " принадлежит другому клиенту");
         }
+    }
+
+    /** Кадры от клиента — только «печатаю» и «прочитал» в чат, где он участник. */
+    private void authorizeSend(StompHeaderAccessor accessor) {
+        AbstractAuthenticationToken authentication = requireUser(accessor);
+        String destination = accessor.getDestination() == null ? "" : accessor.getDestination();
+
+        Matcher send = CHAT_SEND.matcher(destination);
+        if (!send.matches()) {
+            throw new MessageDeliveryException("Отправлять можно только /app/order.{orderId}.chat.typing|read");
+        }
+
+        requireChatParticipant(authentication, Long.valueOf(send.group(1)));
+    }
+
+    private void requireChatParticipant(AbstractAuthenticationToken authentication, Long orderId) {
+        try {
+            chatParticipants.require(orderId, Long.valueOf(authentication.getName()), isAdmin(authentication));
+        } catch (ResourceNotFoundException exception) {
+            log.warn("WebSocket: не участник чата: orderId={}, userId={}", orderId, authentication.getName());
+
+            throw new MessageDeliveryException("Чат заказа с id=" + orderId + " недоступен");
+        }
+    }
+
+    private static AbstractAuthenticationToken requireUser(StompHeaderAccessor accessor) {
+        Principal principal = accessor.getUser();
+
+        if (!(principal instanceof AbstractAuthenticationToken authentication)) {
+            throw new MessageDeliveryException("Сначала CONNECT с токеном");
+        }
+
+        return authentication;
     }
 
     private static boolean isAdmin(Authentication authentication) {
