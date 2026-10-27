@@ -11,7 +11,7 @@ import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
 /**
- * WebSocket со STOMP для живого трека.
+ * WebSocket со STOMP для живого трека и чата заказа.
  *
  * <p><b>Зачем WebSocket.</b> Без него клиент узнаёт о новой точке, только спросив: опрос
  * раз в пару секунд — это тысячи пустых запросов на каждого, кто смотрит на карту. Здесь
@@ -49,6 +49,10 @@ public class LiveTrackingConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         LiveTrackingProperties.Relay relay = properties.relay();
+
+        // Кадры на /app/... идут в обработчики @MessageMapping (чат: «печатаю», «прочитал»),
+        // на /topic/... — в брокер.
+        registry.setApplicationDestinationPrefixes("/app");
 
         if (relay.enabled()) {
             // Два набора учётных данных: клиентские — для соединений браузеров, системные — для
